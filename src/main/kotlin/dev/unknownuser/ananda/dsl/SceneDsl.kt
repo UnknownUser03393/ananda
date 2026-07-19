@@ -5,6 +5,12 @@ import dev.unknownuser.ananda.animation.Easings
 import dev.unknownuser.ananda.animation.Animation
 import dev.unknownuser.ananda.animation.AnimationDirection
 import dev.unknownuser.ananda.animation.RepeatMode
+import dev.unknownuser.ananda.animation.EnterTransition
+import dev.unknownuser.ananda.animation.ExitTransition
+import dev.unknownuser.ananda.animation.Animatable
+import dev.unknownuser.ananda.animation.MotionAnimation
+import dev.unknownuser.ananda.animation.MotionSpec
+import dev.unknownuser.ananda.animation.TweenSpec
 import dev.unknownuser.ananda.backend.FramebufferRegion
 import dev.unknownuser.ananda.backend.GradientDirection
 import dev.unknownuser.ananda.backend.ImageFit
@@ -471,6 +477,19 @@ class SceneBuilder(private val scene: Scene) {
         block: (Float) -> Unit
     ) = scene.animateFloat(from.toFloat(), to.toFloat(), durationSeconds.toFloat(), delaySeconds.toFloat(), easing, repeat, repeatCount, repeatMode, direction, onFinished, block)
 
+    fun <T> animateTo(
+        animatable: Animatable<T>,
+        targetValue: T,
+        spec: MotionSpec = TweenSpec(),
+        onFinished: () -> Unit = {}
+    ): MotionAnimation<T> = scene.animateTo(animatable, targetValue, spec, onFinished)
+
+    fun transitionTheme(
+        target: Theme,
+        spec: MotionSpec = TweenSpec(durationSeconds = 0.35f),
+        onFinished: () -> Unit = {}
+    ): MotionAnimation<Float> = scene.transitionTheme(target, spec, onFinished)
+
     fun onUpdate(block: (TimeFrame) -> Unit): TimeSubscription =
         scene.onUpdate(block)
 
@@ -797,6 +816,24 @@ class ComponentBuilder(private val component: Component) {
 
     fun align(alignment: Alignment?) {
         component.align(alignment)
+    }
+
+    fun animateEnter(transition: EnterTransition = EnterTransition()) {
+        component.animateEnter(transition)
+    }
+
+    fun animateExit(
+        transition: ExitTransition = ExitTransition(),
+        onFinished: () -> Unit = {}
+    ) {
+        component.animateExit(transition, onFinished)
+    }
+
+    fun staggerChildren(
+        staggerSeconds: Number = 0.045f,
+        transition: EnterTransition = EnterTransition()
+    ) {
+        component.staggerChildren(staggerSeconds.toFloat(), transition)
     }
 
     fun <T : Component> add(child: T, block: ComponentBuilder.() -> Unit = {}): T {

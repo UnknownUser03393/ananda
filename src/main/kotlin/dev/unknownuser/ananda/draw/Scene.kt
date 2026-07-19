@@ -6,6 +6,10 @@ import dev.unknownuser.ananda.animation.Animator
 import dev.unknownuser.ananda.animation.Easing
 import dev.unknownuser.ananda.animation.Easings
 import dev.unknownuser.ananda.animation.RepeatMode
+import dev.unknownuser.ananda.animation.Animatable
+import dev.unknownuser.ananda.animation.MotionAnimation
+import dev.unknownuser.ananda.animation.MotionSpec
+import dev.unknownuser.ananda.animation.TweenSpec
 import dev.unknownuser.ananda.backend.RenderContext
 import dev.unknownuser.ananda.backend.SkiaRenderBackend
 import dev.unknownuser.ananda.component.Component
@@ -19,6 +23,7 @@ import dev.unknownuser.ananda.event.TextInputEvent
 import dev.unknownuser.ananda.interaction.ComponentHost
 import dev.unknownuser.ananda.interaction.InteractionProvider
 import dev.unknownuser.ananda.theme.Theme
+import dev.unknownuser.ananda.theme.interpolateTheme
 import dev.unknownuser.ananda.time.TimeFrame
 import dev.unknownuser.ananda.time.TimeSubscription
 import dev.unknownuser.ananda.time.TimeSystem
@@ -100,6 +105,12 @@ class Scene : InteractionProvider, ComponentHost {
     val animator = Animator()
     val time = TimeSystem()
     var theme: Theme = Theme.Default
+        set(value) {
+            field = value
+            themeTransition?.progress?.animation?.cancel()
+            themeTransition = null
+            requestRender()
+        }
     var uiScale: Float = 1f
     override var focusedComponent: Component? = null
         private set
@@ -107,6 +118,13 @@ class Scene : InteractionProvider, ComponentHost {
         private set
     private var pressedComponent: Component? = null
     private val renderRequested = AtomicBoolean(true)
+    private var themeTransition: ActiveThemeTransition? = null
+
+    private data class ActiveThemeTransition(
+        val from: Theme,
+        val to: Theme,
+        val progress: Animatable<Float>
+    )
 
     fun add(drawable: Drawable): Drawable {
         items += drawable
@@ -222,6 +240,36 @@ class Scene : InteractionProvider, ComponentHost {
         requestRender()
         return animator.animateFloat(from, to, durationSeconds, delaySeconds, easing, repeat, repeatCount, repeatMode, direction, onFinished, update)
     }
+
+    fun <T> animateTo(
+        animatable: Animatable<T>,
+        targetValue: T,
+        spec: MotionSpec = TweenSpec(),
+        onFinished: () -> Unit = {}
+    ): MotionAnimation<T> {
+        requestRender()
+        return animator.animateTo(animatable, targetValue, spec, onFinished)
+    }
+
+    fun transitionTheme(
+        target: Theme,
+        spec: MotionSpec = TweenSpec(durationSeconds = 0.35f),
+        onFinished: () -> Unit = {}
+    ): MotionAnimation<Float> {
+        val from = resolvedTheme()
+        theme = target
+        val progress = Animatable.float(0f)
+        themeTransition = ActiveThemeTransition(from, target, progress)
+        return animateTo(progress, 1f, spec) {
+            themeTransition = null
+            requestRender()
+            onFinished()
+        }
+    }
+
+    fun resolvedTheme(): Theme = themeTransition?.let {
+        interpolateTheme(it.from, it.to, it.progress.value)
+    } ?: theme
 
     fun onUpdate(handler: (TimeFrame) -> Unit): TimeSubscription {
         requestRender()
@@ -396,7 +444,7 @@ class Scene : InteractionProvider, ComponentHost {
             width = (context.width / scale).toInt(),
             height = (context.height / scale).toInt(),
             uiScale = scale
-        ).withTheme(theme)
+        ).withTheme(resolvedTheme())
         logicalContext.backend.scaled(scale) {
             items.forEach { it.draw(logicalContext) }
             layers.visible.forEach { layer -> layer.component.draw(logicalContext) }

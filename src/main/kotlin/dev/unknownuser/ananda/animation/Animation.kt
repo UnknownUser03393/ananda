@@ -1,11 +1,14 @@
 package dev.unknownuser.ananda.animation
 
 import java.util.concurrent.CopyOnWriteArrayList
+import java.awt.Color
 import kotlin.math.PI
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 fun interface Easing {
     fun transform(t: Float): Float
@@ -65,6 +68,71 @@ data class AnimationFrame(
 typealias AnimationUpdate = (Float) -> Unit
 typealias AnimationFrameUpdate = (AnimationFrame) -> Unit
 
+interface AnimationDriver {
+    val active: Boolean
+    val running: Boolean
+    fun tick(deltaSeconds: Float): Boolean
+    fun cancel()
+    fun finish()
+    fun pause()
+    fun resume()
+}
+
+fun interface ValueInterpolator<T> {
+    /** [progress] is intentionally not clamped so springs can overshoot. */
+    fun interpolate(from: T, to: T, progress: Float): T
+}
+
+object ValueInterpolators {
+    val Float = ValueInterpolator<Float> { from, to, progress -> from + (to - from) * progress }
+    val Color = ValueInterpolator<Color> { from, to, progress ->
+        Color(
+            (from.red + (to.red - from.red) * progress).toInt().coerceIn(0, 255),
+            (from.green + (to.green - from.green) * progress).toInt().coerceIn(0, 255),
+            (from.blue + (to.blue - from.blue) * progress).toInt().coerceIn(0, 255),
+            (from.alpha + (to.alpha - from.alpha) * progress).toInt().coerceIn(0, 255)
+        )
+    }
+}
+
+sealed interface MotionSpec
+
+data class TweenSpec(
+    val durationSeconds: Float = 0.25f,
+    val easing: Easing = Easings.EaseOutCubic,
+    val delaySeconds: Float = 0f
+) : MotionSpec
+
+data class SpringSpec(
+    val stiffness: Float = 220f,
+    val dampingRatio: Float = 0.78f,
+    val visibilityThreshold: Float = 0.001f,
+    val maxDeltaSeconds: Float = 0.05f
+) : MotionSpec
+
+class Animatable<T>(
+    initialValue: T,
+    internal val interpolator: ValueInterpolator<T>
+) {
+    var value: T = initialValue
+        internal set
+    var targetValue: T = initialValue
+        internal set
+    internal var animation: MotionAnimation<T>? = null
+
+    fun snapTo(value: T) {
+        animation?.cancel()
+        animation = null
+        this.value = value
+        targetValue = value
+    }
+
+    companion object {
+        fun float(initialValue: Float): Animatable<Float> = Animatable(initialValue, ValueInterpolators.Float)
+        fun color(initialValue: Color): Animatable<Color> = Animatable(initialValue, ValueInterpolators.Color)
+    }
+}
+
 fun lerp(start: Float, end: Float, progress: Float): Float =
     start + (end - start) * progress.coerceIn(0f, 1f)
 
@@ -84,7 +152,7 @@ class Animation(
     private val onStarted: () -> Unit = {},
     private val onRepeated: (Int) -> Unit = {},
     private val onCancelled: () -> Unit = {}
-) {
+) : AnimationDriver {
     private var elapsed = 0f
     private var started = false
     var state: AnimationState = AnimationState.Pending
@@ -95,12 +163,12 @@ class Animation(
         private set
     var progress: Float = 0f
         private set
-    val running: Boolean
+    override val running: Boolean
         get() = state == AnimationState.Pending || state == AnimationState.Delayed || state == AnimationState.Running
-    val active: Boolean
+    override val active: Boolean
         get() = running || state == AnimationState.Paused
 
-    fun tick(deltaSeconds: Float): Boolean {
+    override fun tick(deltaSeconds: Float): Boolean {
         if (state == AnimationState.Finished || state == AnimationState.Cancelled) return true
         if (state == AnimationState.Paused) return false
 
@@ -136,11 +204,11 @@ class Animation(
         return false
     }
 
-    fun pause() {
+    override fun pause() {
         if (running) state = AnimationState.Paused
     }
 
-    fun resume() {
+    override fun resume() {
         if (state == AnimationState.Paused) {
             state = if (elapsed < delaySeconds) AnimationState.Delayed else AnimationState.Running
         }
@@ -155,7 +223,7 @@ class Animation(
         state = AnimationState.Pending
     }
 
-    fun finish() {
+    override fun finish() {
         if (state == AnimationState.Finished || state == AnimationState.Cancelled) return
         rawProgress = 1f
         progress = easing.transform(directedProgress(1f).coerceIn(0f, 1f))
@@ -164,7 +232,7 @@ class Animation(
         onFinished()
     }
 
-    fun cancel() {
+    override fun cancel() {
         if (state == AnimationState.Finished || state == AnimationState.Cancelled) return
         state = AnimationState.Cancelled
         onCancelled()
@@ -188,12 +256,107 @@ class Animation(
     }
 }
 
+class MotionAnimation<T> internal constructor(
+    private val animatable: Animatable<T>,
+    private val from: T,
+    private val to: T,
+    private val spec: MotionSpec,
+    private val onFinished: () -> Unit
+) : AnimationDriver {
+    private var elapsed = 0f
+    private var progress = 0f
+    private var velocity = 0f
+    private var cancelled = false
+    private var finished = false
+    private var paused = false
+
+    override val active: Boolean get() = !cancelled && !finished
+    override val running: Boolean get() = active && !paused
+
+    override fun tick(deltaSeconds: Float): Boolean {
+        if (!active) return true
+        if (paused) return false
+        val done = when (val motion = spec) {
+            is TweenSpec -> tickTween(deltaSeconds, motion)
+            is SpringSpec -> tickSpring(deltaSeconds, motion)
+        }
+        animatable.value = animatable.interpolator.interpolate(from, to, progress)
+        if (done) finish()
+        return done
+    }
+
+    override fun cancel() {
+        cancelled = true
+        if (animatable.animation === this) animatable.animation = null
+    }
+
+    override fun pause() {
+        if (active) paused = true
+    }
+
+    override fun resume() {
+        if (active) paused = false
+    }
+
+    private fun tickTween(deltaSeconds: Float, spec: TweenSpec): Boolean {
+        elapsed += deltaSeconds.coerceAtLeast(0f)
+        if (elapsed < spec.delaySeconds) return false
+        val raw = if (spec.durationSeconds <= 0f) 1f
+        else ((elapsed - spec.delaySeconds) / spec.durationSeconds).coerceIn(0f, 1f)
+        progress = spec.easing.transform(raw)
+        return raw >= 1f
+    }
+
+    private fun tickSpring(deltaSeconds: Float, spec: SpringSpec): Boolean {
+        val dt = deltaSeconds.coerceIn(0f, spec.maxDeltaSeconds.coerceAtLeast(0.001f))
+        val steps = ceil(dt / StableSpringStep).toInt().coerceAtLeast(1)
+        val step = dt / steps
+        val stiffness = spec.stiffness.coerceAtLeast(0.01f)
+        val damping = 2f * spec.dampingRatio.coerceAtLeast(0f) * sqrt(stiffness)
+        repeat(steps) {
+            val acceleration = -stiffness * (progress - 1f) - damping * velocity
+            velocity += acceleration * step
+            progress += velocity * step
+        }
+        return kotlin.math.abs(1f - progress) <= spec.visibilityThreshold &&
+            kotlin.math.abs(velocity) <= spec.visibilityThreshold
+    }
+
+    override fun finish() {
+        if (!active) return
+        progress = 1f
+        animatable.value = to
+        animatable.targetValue = to
+        if (animatable.animation === this) animatable.animation = null
+        finished = true
+        onFinished()
+    }
+
+    private companion object {
+        const val StableSpringStep = 1f / 120f
+    }
+}
+
 class Animator {
-    private val animations = CopyOnWriteArrayList<Animation>()
+    private val animations = CopyOnWriteArrayList<AnimationDriver>()
     val activeAnimations: Int
         get() = animations.count { it.active }
 
     fun add(animation: Animation): Animation {
+        animations += animation
+        return animation
+    }
+
+    fun <T> animateTo(
+        animatable: Animatable<T>,
+        targetValue: T,
+        spec: MotionSpec = TweenSpec(),
+        onFinished: () -> Unit = {}
+    ): MotionAnimation<T> {
+        animatable.animation?.cancel()
+        val animation = MotionAnimation(animatable, animatable.value, targetValue, spec, onFinished)
+        animatable.targetValue = targetValue
+        animatable.animation = animation
         animations += animation
         return animation
     }

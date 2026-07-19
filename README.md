@@ -107,6 +107,22 @@ Run the interactive showcase with:
 
 See `src/main/kotlin/dev/unknownuser/ananda/material3/README.md` for the component catalog.
 
+## Framework Animation
+
+`Animatable<T>` keeps target-driven animation state separate from components. Tween and numerically stable spring specs use the scene animator and therefore participate in pause, cancellation, OnDemand rendering, and retargeting:
+
+```kotlin
+val offset = Animatable.float(0f)
+scene.animateTo(offset, 240f, SpringSpec(stiffness = 220f, dampingRatio = 0.78f))
+
+scene.transitionTheme(
+    MaterialTheme.light(),
+    SpringSpec(stiffness = 180f, dampingRatio = 0.9f)
+)
+```
+
+Components support `animateEnter(...)`, `animateExit(...)`, and staggered fade/slide/scale entrances through `staggerChildren(...)`. Custom drawing code can wrap related primitives in `context.interpolationPart(owner, part) { ... }` so automatic shape interpolation remains stable when draw order changes.
+
 ## Input
 
 The event pipeline currently supports:

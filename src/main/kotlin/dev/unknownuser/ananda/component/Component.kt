@@ -1,5 +1,8 @@
 package dev.unknownuser.ananda.component
 
+import dev.unknownuser.ananda.animation.EnterFrame
+import dev.unknownuser.ananda.animation.EnterTransition
+import dev.unknownuser.ananda.animation.ExitTransition
 import dev.unknownuser.ananda.backend.GradientDirection
 import dev.unknownuser.ananda.backend.CornerRadii
 import dev.unknownuser.ananda.backend.ImageFit
@@ -127,6 +130,7 @@ open class Component(
     var positionedByUser: Boolean = false
         internal set
     var interpolationKey: Any? = null
+    var enterTransition: EnterTransition? = null
     var measuredWidth: Float = width
         private set
     var measuredHeight: Float = height
@@ -145,6 +149,10 @@ open class Component(
     private var ownerHost: ComponentHost? = null
     private var mounted = false
     private var disposed = false
+    private var enterElapsedSeconds = 0f
+    private var exitTransition: ExitTransition? = null
+    private var exitElapsedSeconds = 0f
+    private var exitFinished: (() -> Unit)? = null
     private var skipMeasureOnce = false
     private var measureWidthOverride: Float? = null
     private var measureHeightOverride: Float? = null
@@ -169,6 +177,7 @@ open class Component(
         }
         layout.layout(this, Constraints(measuredWidth, measuredHeight))
         val bounds = animatedBounds(childContext)
+        val enter = enterFrame(childContext.time.deltaSeconds)
         val interpolationScope = childContext.backend as? ShapeInterpolationScope
         interpolationScope?.pushInterpolationKey(interpolationKey ?: this)
         try {
@@ -176,11 +185,13 @@ open class Component(
                 childContext.backend.rotated(rotationDegrees, bounds.width / 2f, bounds.height / 2f) {
                     childContext.backend.scaled(scaleX, scaleY) {
                         childContext.backend.translated(
-                            translate.resolveX(bounds.width),
-                            translate.resolveY(bounds.height)
+                            translate.resolveX(bounds.width) + enter.translateX,
+                            translate.resolveY(bounds.height) + enter.translateY
                         ) {
-                            childContext.backend.withAlpha(opacity) {
-                                drawSelfAndChildren(childContext, bounds.width, bounds.height)
+                            childContext.backend.scaled(enter.scale) {
+                                childContext.backend.withAlpha(opacity * enter.alpha) {
+                                    drawSelfAndChildren(childContext, bounds.width, bounds.height)
+                                }
                             }
                         }
                     }
@@ -416,6 +427,51 @@ open class Component(
         return state
     }
 
+    private fun enterFrame(deltaSeconds: Float): EnterFrame {
+        exitTransition?.let { transition ->
+            exitElapsedSeconds += deltaSeconds.coerceIn(0f, 0.1f)
+            val raw = if (transition.durationSeconds <= 0f) {
+                if (exitElapsedSeconds >= transition.delaySeconds) 1f else 0f
+            } else {
+                ((exitElapsedSeconds - transition.delaySeconds) / transition.durationSeconds).coerceIn(0f, 1f)
+            }
+            val progress = transition.easing.transform(raw)
+            if (raw < 1f) {
+                requestRender()
+            } else {
+                val finished = exitFinished
+                exitFinished = null
+                exitTransition = null
+                visible = false
+                finished?.invoke()
+            }
+            return EnterFrame(
+                translateX = transition.slideX * progress,
+                translateY = transition.slideY * progress,
+                alpha = 1f + (transition.finalAlpha - 1f) * progress,
+                scale = 1f + (transition.finalScale - 1f) * progress,
+                running = raw < 1f
+            )
+        }
+        val transition = enterTransition ?: return EnterFrame()
+        enterElapsedSeconds += deltaSeconds.coerceIn(0f, 0.1f)
+        val raw = if (transition.durationSeconds <= 0f) {
+            if (enterElapsedSeconds >= transition.delaySeconds) 1f else 0f
+        } else {
+            ((enterElapsedSeconds - transition.delaySeconds) / transition.durationSeconds).coerceIn(0f, 1f)
+        }
+        val progress = transition.easing.transform(raw)
+        val running = raw < 1f
+        if (running) requestRender()
+        return EnterFrame(
+            translateX = transition.slideX * (1f - progress),
+            translateY = transition.slideY * (1f - progress),
+            alpha = transition.initialAlpha + (1f - transition.initialAlpha) * progress,
+            scale = transition.initialScale + (1f - transition.initialScale) * progress,
+            running = running
+        )
+    }
+
     open fun measure(constraints: Constraints): Size {
         applyStyle()
         val size = layout.measure(this, constraints)
@@ -618,6 +674,38 @@ open class Component(
 
     fun interpolationKey(key: Any?) = apply {
         interpolationKey = key
+    }
+
+    fun animateEnter(transition: EnterTransition = EnterTransition()) = apply {
+        enterTransition = transition
+        replayEnter()
+    }
+
+    fun replayEnter() = apply {
+        exitTransition = null
+        exitFinished = null
+        visible = true
+        enterElapsedSeconds = 0f
+        requestRender()
+    }
+
+    fun animateExit(
+        transition: ExitTransition = ExitTransition(),
+        onFinished: () -> Unit = {}
+    ) = apply {
+        exitTransition = transition
+        exitElapsedSeconds = 0f
+        exitFinished = onFinished
+        requestRender()
+    }
+
+    fun staggerChildren(
+        staggerSeconds: Float = 0.045f,
+        transition: EnterTransition = EnterTransition()
+    ) = apply {
+        children.forEachIndexed { index, child ->
+            child.animateEnter(transition.copy(delaySeconds = transition.delaySeconds + index * staggerSeconds))
+        }
     }
 
     fun padding(all: Number) = apply {
@@ -836,6 +924,7 @@ open class Component(
     internal fun mountRecursively() {
         if (mounted || disposed) return
         mounted = true
+        if (enterTransition != null) enterElapsedSeconds = 0f
         mountHooks.forEach { it() }
         children.forEach { it.attachTo(ownerHost, true) }
     }
@@ -866,7 +955,7 @@ open class Component(
     internal open fun pointerPath(globalX: Float, globalY: Float): List<Component> {
         val hitWidth = if (measuredWidth > 0f) measuredWidth else width
         val hitHeight = if (measuredHeight > 0f) measuredHeight else height
-        if (disposed || !visible || disabled || globalX < x || globalY < y || globalX > x + hitWidth || globalY > y + hitHeight) {
+        if (disposed || !visible || exitTransition != null || disabled || globalX < x || globalY < y || globalX > x + hitWidth || globalY > y + hitHeight) {
             return emptyList()
         }
 

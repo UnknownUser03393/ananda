@@ -11,6 +11,21 @@ interface ShapeInterpolationScope {
     fun popInterpolationKey()
 }
 
+data class InterpolationPartKey(val owner: Any, val part: Any)
+
+fun RenderBackend.withInterpolationKey(key: Any, block: () -> Unit) {
+    val scope = this as? ShapeInterpolationScope
+    scope?.pushInterpolationKey(key)
+    try {
+        block()
+    } finally {
+        scope?.popInterpolationKey()
+    }
+}
+
+fun RenderContext.interpolationPart(owner: Any, part: Any, block: () -> Unit) =
+    backend.withInterpolationKey(InterpolationPartKey(owner, part), block)
+
 class ShapeInterpolatingRenderBackend(
     private var delegate: RenderBackend
 ) : RenderBackend, ShapeInterpolationScope {
@@ -209,6 +224,12 @@ class ShapeInterpolatingRenderBackend(
 
     override fun scaled(scaleX: Float, scaleY: Float, block: () -> Unit) =
         delegate.scaled(scaleX, scaleY, block)
+
+    override fun rotated(degrees: Float, pivotX: Float, pivotY: Float, block: () -> Unit) =
+        delegate.rotated(degrees, pivotX, pivotY, block)
+
+    override fun withAlpha(alpha: Float, block: () -> Unit) =
+        delegate.withAlpha(alpha, block)
 
     private fun rectState(type: String, x: Float, y: Float, width: Float, height: Float, radius: Float, fill: Color?, stroke: Stroke?): RectState {
         val key = nextKey(type)
