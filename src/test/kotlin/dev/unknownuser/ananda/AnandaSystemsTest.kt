@@ -568,6 +568,7 @@ class AnandaSystemsTest {
         scroll.measure(Constraints(100f, 40f))
         scroll.layout.layout(scroll, Constraints(100f, 40f))
         scene.dispatch(PointerEvent("pointerScroll", 10f, 10f, deltaY = -3f))
+        repeat(6) { scroll.advanceScroll(1f / 60f) }
         scene.dispatch(PointerEvent("pointerDown", 10f, 20f))
 
         assertTrue(scroll.scrollY > 0f)

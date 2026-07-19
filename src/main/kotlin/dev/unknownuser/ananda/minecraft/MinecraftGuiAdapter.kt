@@ -2,7 +2,6 @@ package dev.unknownuser.ananda.minecraft
 
 import dev.unknownuser.ananda.backend.RenderBackend
 import dev.unknownuser.ananda.backend.RenderContext
-import dev.unknownuser.ananda.backend.ShapeInterpolatingRenderBackend
 import dev.unknownuser.ananda.draw.Scene
 import dev.unknownuser.ananda.event.KeyEvent
 import dev.unknownuser.ananda.event.PointerEvent
@@ -22,19 +21,14 @@ class MinecraftGuiAdapter(
     val scene: Scene = Scene()
 ) {
     private var lastNanoTime: Long = 0L
-    private var interpolationBackend: ShapeInterpolatingRenderBackend? = null
 
     fun render(surface: MinecraftGuiSurface) {
         val deltaSeconds = if (lastNanoTime == 0L) 0f else (surface.nanoTime - lastNanoTime) / 1_000_000_000f
         lastNanoTime = surface.nanoTime
-        val backend = interpolationBackend ?: ShapeInterpolatingRenderBackend(surface.backend).also {
-            interpolationBackend = it
-        }
-        backend.beginFrame(surface.backend, deltaSeconds)
         scene.update(deltaSeconds)
         scene.render(
             RenderContext(
-                backend = backend,
+                backend = surface.backend,
                 width = surface.width,
                 height = surface.height,
                 nanoTime = surface.nanoTime,
@@ -42,9 +36,6 @@ class MinecraftGuiAdapter(
                 scaleFactor = surface.scaleFactor
             )
         )
-        if (backend.endFrame()) {
-            scene.requestRender()
-        }
     }
 
     fun mouseMoved(mouseX: Double, mouseY: Double) {
@@ -112,6 +103,5 @@ class MinecraftGuiAdapter(
     fun removed() {
         scene.clear()
         lastNanoTime = 0L
-        interpolationBackend = null
     }
 }

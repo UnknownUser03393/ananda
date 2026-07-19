@@ -4,6 +4,8 @@ import dev.unknownuser.ananda.theme.Theme
 import dev.unknownuser.ananda.theme.DefaultFontFamily
 import dev.unknownuser.ananda.time.TimeFrame
 import java.awt.Color
+import kotlin.math.cos
+import kotlin.math.sin
 
 data class Stroke(
     val color: Color,
@@ -160,6 +162,20 @@ interface RenderBackend {
     }
 
     fun drawCircle(x: Float, y: Float, radius: Float, fill: Color? = null, stroke: Stroke? = null)
+
+    fun drawArc(x: Float, y: Float, radius: Float, startAngle: Float, sweepAngle: Float, stroke: Stroke) {
+        val segments = (kotlin.math.abs(sweepAngle) * radius / 3f).toInt().coerceIn(12, 128)
+        var previousX = x + cos(startAngle) * radius
+        var previousY = y + sin(startAngle) * radius
+        for (index in 1..segments) {
+            val angle = startAngle + sweepAngle * index / segments
+            val nextX = x + cos(angle) * radius
+            val nextY = y + sin(angle) * radius
+            drawLine(previousX, previousY, nextX, nextY, stroke)
+            previousX = nextX
+            previousY = nextY
+        }
+    }
 
     fun drawRoundedGradientRect(
         x: Float,

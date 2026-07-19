@@ -186,6 +186,21 @@ class SkiaRenderBackend(val canvas: Canvas) : RenderBackend {
         strokePaint(stroke)?.use { canvas.drawCircle(x, y, radius, it) }
     }
 
+    override fun drawArc(x: Float, y: Float, radius: Float, startAngle: Float, sweepAngle: Float, stroke: Stroke) {
+        strokePaint(stroke)?.use { paint ->
+            canvas.drawArc(
+                x - radius,
+                y - radius,
+                x + radius,
+                y + radius,
+                Math.toDegrees(startAngle.toDouble()).toFloat(),
+                Math.toDegrees(sweepAngle.toDouble()).toFloat(),
+                false,
+                paint
+            )
+        }
+    }
+
     override fun drawRoundedGradientRect(
         x: Float,
         y: Float,

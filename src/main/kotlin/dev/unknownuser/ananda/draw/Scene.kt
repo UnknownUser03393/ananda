@@ -297,6 +297,16 @@ class Scene : InteractionProvider, ComponentHost {
 
     override fun dispatch(event: PointerEvent) {
         val logicalEvent = event.toLogical()
+        val captured = pressedComponent
+        if (captured != null && logicalEvent.type in setOf("pointerMove", "pointerUp")) {
+            captured.dispatch(logicalEvent)
+            if (!logicalEvent.consumed) events.emit(logicalEvent)
+            if (logicalEvent.type == "pointerUp") {
+                updatePressed(captured, false)
+                pressedComponent = null
+            }
+            return
+        }
         val topLayer = layers.top
         if (topLayer != null && dispatchToLayer(topLayer, logicalEvent)) {
             return

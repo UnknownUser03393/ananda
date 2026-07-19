@@ -714,12 +714,14 @@ class ScrollContainer(
 ) : Component(x, y, width, height) {
     var scrollY: Float = 0f
     var scrollStep: Float = 18f
+    var smoothScrollSpeed: Float = 18f
+    private var targetScrollY: Float = 0f
 
     init {
         layout = ColumnLayout()
         clipToBounds = true
         on(PointerScroll) {
-            scrollY = (scrollY - it.deltaY * scrollStep).coerceIn(0f, maxScrollY())
+            targetScrollY = (targetScrollY - it.deltaY * scrollStep).coerceIn(0f, maxScrollY())
             requestRender()
             it.consume()
         }
@@ -734,7 +736,10 @@ class ScrollContainer(
             )
         )
         layout.layout(this, dev.unknownuser.ananda.layout.Constraints(measuredWidth, measuredHeight))
-        scrollY = scrollY.coerceIn(0f, maxScrollY())
+        val maximum = maxScrollY()
+        targetScrollY = targetScrollY.coerceIn(0f, maximum)
+        scrollY = scrollY.coerceIn(0f, maximum)
+        advanceScroll(context.time.deltaSeconds.coerceAtLeast(1f / 240f))
         context.backend.translated(x, y) {
             context.backend.clipped(0f, 0f, measuredWidth, measuredHeight) {
                 context.backend.translated(0f, -scrollY) {
@@ -764,4 +769,14 @@ class ScrollContainer(
             ?.minus(measuredHeight)
             ?.coerceAtLeast(0f)
             ?: 0f
+
+    internal fun advanceScroll(deltaSeconds: Float) {
+        val distance = targetScrollY - scrollY
+        if (kotlin.math.abs(distance) > 0.1f) {
+            scrollY += distance * (1f - kotlin.math.exp(-smoothScrollSpeed * deltaSeconds.coerceAtLeast(0f)))
+            requestRender()
+        } else {
+            scrollY = targetScrollY
+        }
+    }
 }

@@ -1,12 +1,14 @@
 package dev.unknownuser.ananda.material3
 
 import dev.unknownuser.ananda.backend.RenderContext
+import dev.unknownuser.ananda.backend.RenderBackend
 import dev.unknownuser.ananda.backend.Shadow
 import dev.unknownuser.ananda.backend.Stroke
 import dev.unknownuser.ananda.backend.TextStyle
 import dev.unknownuser.ananda.component.Component
 import dev.unknownuser.ananda.event.ImeCommit
 import dev.unknownuser.ananda.event.ImeCompose
+import dev.unknownuser.ananda.event.Blur
 import dev.unknownuser.ananda.event.KeyDown
 import dev.unknownuser.ananda.event.KeyEvent
 import dev.unknownuser.ananda.event.PointerDown
@@ -533,6 +535,9 @@ class MaterialTextField(
     private var focused = 0f
     private var labelProgress = if (value.value.isNotEmpty()) 1f else 0f
     private var placeholderProgress = if (label.isBlank() && value.value.isEmpty()) 1f else 0f
+    private var selectingWithPointer = false
+    private var textBackend: RenderBackend? = null
+    private var textStyle: TextStyle? = null
 
     init {
         focusable = true
@@ -542,7 +547,30 @@ class MaterialTextField(
         onDispose { value.unsubscribe(invalidate) }
         on(PointerDown) {
             requestFocus()
+            val local = sceneToLocal(it.x, it.y)
+            cursor = cursorAt(local.first)
+            selectionAnchor = cursor
+            selectingWithPointer = true
             it.consume()
+        }
+        on(PointerMove) {
+            if (selectingWithPointer && interaction.pressed) {
+                cursor = cursorAt(sceneToLocal(it.x, it.y).first)
+                requestRender()
+                it.consume()
+            }
+        }
+        on(PointerUp) {
+            if (selectingWithPointer) {
+                cursor = cursorAt(sceneToLocal(it.x, it.y).first)
+                selectingWithPointer = false
+                it.consume()
+            }
+        }
+        on(Blur) {
+            selectionAnchor = null
+            selectingWithPointer = false
+            requestRender()
         }
         on(TextInput) {
             replaceSelection(it.text)
@@ -640,6 +668,8 @@ class MaterialTextField(
                 if (disabled) p.onSurface.withAlpha(97) else p.onSurface,
                 context.theme.typography.fontFamily
             )
+            textBackend = context.backend
+            textStyle = bodyStyle
             val textCenterY = bodyBaseline - bodySize * 0.36f
             val caretHeight = (bodySize * 1.25f).coerceAtLeast(16f)
             val caretTop = textCenterY - caretHeight / 2f
@@ -790,6 +820,19 @@ class MaterialTextField(
     }
 
     private fun selectedText(): String? = selectionRange()?.let { value.value.substring(it.first, it.second) }
+
+    private fun cursorAt(localX: Float): Int {
+        val backend = textBackend ?: return value.value.length
+        val style = textStyle ?: return value.value.length
+        val target = (localX - padding.left).coerceAtLeast(0f)
+        var previousWidth = 0f
+        for (index in 1..value.value.length) {
+            val width = backend.measureText(value.value.substring(0, index), style).first
+            if (target < (previousWidth + width) / 2f) return index - 1
+            previousWidth = width
+        }
+        return value.value.length
+    }
 
     private fun setClipboard(text: String) {
         runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }
@@ -1214,7 +1257,7 @@ class MaterialSlider(
         value.subscribe(invalidate)
         onDispose { value.unsubscribe(invalidate) }
         on(PointerDown) {
-            val localX = it.x - x
+            val localX = sceneToLocal(it.x, it.y).first
             pressStartX = localX
             dragging = isOnThumb(localX)
             updateFromPointer(localX, immediateVisual = true)
@@ -1224,7 +1267,7 @@ class MaterialSlider(
         }
         on(PointerMove) {
             if (interaction.pressed && !disabled) {
-                val localX = it.x - x
+                val localX = sceneToLocal(it.x, it.y).first
                 if (dragging || abs(localX - pressStartX) >= 2f) {
                     dragging = true
                     updateFromPointer(localX, immediateVisual = true)
@@ -1344,15 +1387,16 @@ class MaterialRangeSlider(
         on(PointerDown) {
             if (disabled) return@on
             requestFocus()
-            activeThumb = thumbFor(it.x - x)
+            val localX = sceneToLocal(it.x, it.y).first
+            activeThumb = thumbFor(localX)
             dragging = true
             setInteraction { copy(pressed = true) }
-            updateFromPointer(it.x - x, activeThumb, immediateVisual = true)
+            updateFromPointer(localX, activeThumb, immediateVisual = true)
             it.consume()
         }
         on(PointerMove) {
             if (interaction.pressed && dragging && !disabled) {
-                updateFromPointer(it.x - x, activeThumb, immediateVisual = true)
+                updateFromPointer(sceneToLocal(it.x, it.y).first, activeThumb, immediateVisual = true)
                 it.consume()
             }
         }
@@ -1605,7 +1649,7 @@ class MaterialFloatingActionButton(
         cornerRadius = measuredHeight / 2f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 70), 10f, offsetY = 3f)
+        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 28), 14f, offsetY = 2f)
         super.draw(context)
         context.backend.translated(x, y) {
             val iconStyle = TextStyle(context.theme.typography.titleSize, if (disabled) p.onSurface.withAlpha(97) else p.onSecondaryContainer, context.theme.typography.fontFamily)
@@ -1739,7 +1783,7 @@ class MaterialSmallFloatingActionButton(
         cornerRadius = 12f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 65), 8f, offsetY = 2f)
+        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 26), 12f, offsetY = 2f)
         super.draw(context)
         context.backend.translated(x, y) {
             val style = TextStyle((context.theme.typography.titleSize - 2f).coerceAtLeast(12f), if (disabled) p.onSurface.withAlpha(97) else p.onSecondaryContainer, context.theme.typography.fontFamily)
@@ -1792,7 +1836,7 @@ class MaterialLargeFloatingActionButton(
         cornerRadius = 28f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 70), 12f, offsetY = 4f)
+        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 28), 16f, offsetY = 2f)
         super.draw(context)
         context.backend.translated(x, y) {
             val style = TextStyle(context.theme.typography.titleSize + 6f, if (disabled) p.onSurface.withAlpha(97) else p.onSecondaryContainer, context.theme.typography.fontFamily)
@@ -1846,7 +1890,7 @@ class MaterialExtendedFloatingActionButton(
         cornerRadius = measuredHeight / 2f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 70), 10f, offsetY = 3f)
+        elevationShadow = if (disabled) null else Shadow(Color(0, 0, 0, 28), 14f, offsetY = 2f)
         super.draw(context)
         context.backend.translated(x, y) {
             val iconStyle = TextStyle(context.theme.typography.titleSize, if (disabled) p.onSurface.withAlpha(97) else p.onSecondaryContainer, context.theme.typography.fontFamily)
@@ -2056,7 +2100,7 @@ class MaterialBottomAppBar(
         cornerRadius = 0f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = Shadow(Color(0, 0, 0, 36), 5f, offsetY = -1f)
+        elevationShadow = Shadow(Color(0, 0, 0, 16), 12f, offsetY = 1f)
         super.draw(context)
         context.backend.translated(x, y) {
             if (fabCradle && fabLabel.isNotBlank()) {
@@ -2146,7 +2190,7 @@ open class MaterialTopAppBar(
         cornerRadius = 0f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = Shadow(Color(0, 0, 0, 45), 6f, offsetY = 1f)
+        elevationShadow = Shadow(Color(0, 0, 0, 16), 12f, offsetY = 1f)
         super.draw(context)
         context.backend.translated(x, y) {
             val navWidth = if (navigationLabel.isBlank()) 0f else 48f
@@ -2363,7 +2407,7 @@ class MaterialNavigationBar(
         onDispose { selectedIndex.unsubscribe(invalidate) }
         on(PointerDown) {
             if (!disabled) {
-                val index = itemIndexAt(it.x - x)
+                val index = itemIndexAt(sceneToLocal(it.x, it.y).first)
                 if (index >= 0) {
                     selectedIndex.value = index
                     onSelect(index)
@@ -2372,7 +2416,7 @@ class MaterialNavigationBar(
             }
         }
         on(PointerMove) {
-            hoverIndex = itemIndexAt(it.x - x)
+            hoverIndex = itemIndexAt(sceneToLocal(it.x, it.y).first)
             requestRender()
         }
     }
@@ -2383,7 +2427,7 @@ class MaterialNavigationBar(
         cornerRadius = 0f
         borderColor = null
         borderWidth = 0f
-        elevationShadow = Shadow(Color(0, 0, 0, 36), 5f, offsetY = -1f)
+        elevationShadow = Shadow(Color(0, 0, 0, 16), 12f, offsetY = 1f)
         super.draw(context)
         if (destinations.isEmpty()) return
         val itemWidth = measuredWidth / destinations.size
@@ -2428,7 +2472,7 @@ class MaterialNavigationRail(
         onDispose { selectedIndex.unsubscribe(invalidate) }
         on(PointerDown) {
             if (!disabled) {
-                val index = itemIndexAt(it.y - y)
+                val index = itemIndexAt(sceneToLocal(it.x, it.y).second)
                 if (index >= 0) {
                     selectedIndex.value = index
                     onSelect(index)
@@ -2437,7 +2481,7 @@ class MaterialNavigationRail(
             }
         }
         on(PointerMove) {
-            hoverIndex = itemIndexAt(it.y - y)
+            hoverIndex = itemIndexAt(sceneToLocal(it.x, it.y).second)
             requestRender()
         }
     }
@@ -2541,7 +2585,7 @@ open class MaterialSnackbar(
         cornerRadius = if (isBanner) MaterialShapes.Medium else MaterialShapes.Small
         borderColor = if (isBanner) p.outlineVariant else null
         borderWidth = if (isBanner) 1f else 0f
-        elevationShadow = if (isBanner) null else Shadow(Color(0, 0, 0, 85), 10f, offsetY = 4f)
+        elevationShadow = if (isBanner) null else Shadow(Color(0, 0, 0, 30), 14f, offsetY = 3f)
         super.draw(context)
         context.backend.translated(x, y) {
             val text = message.value.orEmpty()
@@ -2575,7 +2619,7 @@ open class MaterialSnackbar(
                 support.forEachIndexed { index, line ->
                     context.backend.drawText(line, 16f, 44f + index * (supportStyle.size + 4f), supportStyle)
                 }
-                val actionRowTop = if (support.isEmpty()) 36f else 52f + support.lastIndex * (supportStyle.size + 4f)
+                val actionRowTop = (measuredHeight - 16f).coerceAtLeast(64f)
                 if (actionLabel.isNotBlank()) {
                     val textWidth = context.backend.measureText(actionLabel, actionStyle).first
                     val actionX = 16f
@@ -2604,7 +2648,7 @@ open class MaterialSnackbar(
     private fun actionAt(localX: Float, localY: Float): Int {
         if (!visible) return Int.MIN_VALUE
         return if (snackbarStyle == MaterialSnackbarStyle.Banner) {
-            val actionTop = if (supportingText.isBlank()) 18f else 34f
+            val actionTop = (measuredHeight - 48f).coerceAtLeast(36f)
             if (actionLabel.isNotBlank() && localX in 8f..140f && localY in actionTop..(actionTop + 36f)) 1
             else if (withDismissAction && localX in (measuredWidth - 44f)..(measuredWidth - 8f) && localY in actionTop..(actionTop + 36f)) 2
             else Int.MIN_VALUE
@@ -2649,7 +2693,7 @@ class MaterialCircularProgressIndicator(
     y: Float = 0f,
     width: Float = 40f,
     height: Float = 40f,
-    var strokeWidth: Float = 4f
+    var strokeWidth: Float = 5f
 ) : Component(x, y, width, height) {
     private val invalidate = { requestRender() }
     private var displayProgress = progress.value.coerceIn(0f, 1f)
@@ -2682,7 +2726,7 @@ class MaterialIndeterminateCircularProgressIndicator(
     y: Float = 0f,
     width: Float = 40f,
     height: Float = 40f,
-    var strokeWidth: Float = 4f,
+    var strokeWidth: Float = 5f,
     var speed: Float = 2.4f
 ) : Component(x, y, width, height) {
     private var phase = 0f
@@ -3012,17 +3056,20 @@ class MaterialDropdownMenu(
         on(PointerDown) {
             if (!visible) return@on
             requestFocus()
-            pressedIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            pressedIndex = itemIndexAt(local.first, local.second)
             it.consume()
         }
         on(PointerMove) {
             if (!visible) return@on
-            hoverIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            hoverIndex = itemIndexAt(local.first, local.second)
             requestRender()
         }
         on(PointerUp) {
             if (!visible) return@on
-            val releasedIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val releasedIndex = itemIndexAt(local.first, local.second)
             when {
                 releasedIndex >= 0 && releasedIndex == pressedIndex -> {
                     items.getOrNull(releasedIndex)?.takeIf { menuItem -> menuItem.enabled && !menuItem.isSection && !menuItem.isDivider }?.onClick?.invoke()
@@ -3169,7 +3216,8 @@ class MaterialExposedDropdownMenu(
         }
         on(PointerDown) {
             requestFocus()
-            val target = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val target = itemIndexAt(local.first, local.second)
             if (target >= 0) {
                 pressedIndex = target
             } else if (target == -1) {
@@ -3181,11 +3229,13 @@ class MaterialExposedDropdownMenu(
             it.consume()
         }
         on(PointerMove) {
-            hoverIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            hoverIndex = itemIndexAt(local.first, local.second)
             requestRender()
         }
         on(PointerUp) {
-            val released = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val released = itemIndexAt(local.first, local.second)
             when {
                 pressedIndex == -1 && released == -1 -> expanded.value = !expanded.value
                 pressedIndex >= 0 && released == pressedIndex -> {
@@ -3313,8 +3363,19 @@ class MaterialExposedDropdownMenu(
     private fun menuBounds(): DialogBounds {
         val popupY = 64f
         val popupWidth = measuredWidth.coerceAtLeast(120f)
-        val popupHeight = (options.size * 40f + 16f).coerceAtMost((measuredHeight - popupY).coerceAtLeast(16f))
+        val popupHeight = options.size * 40f + 16f
         return DialogBounds(0f, popupY, popupWidth, popupHeight)
+    }
+
+    internal override fun pointerPath(globalX: Float, globalY: Float): List<Component> {
+        if (!visible || disabled) return emptyList()
+        // pointerPath receives coordinates in the parent component's space.
+        val localX = globalX - x
+        val localY = globalY - y
+        val inField = localX in 0f..measuredWidth && localY in 0f..56f
+        val bounds = menuBounds()
+        val inMenu = expanded.value && localX in bounds.x..(bounds.x + bounds.width) && localY in bounds.y..(bounds.y + bounds.height)
+        return if (inField || inMenu) listOf(this) else emptyList()
     }
 
     private fun itemIndexAt(localX: Float, localY: Float): Int {
@@ -4274,22 +4335,26 @@ class MaterialCarousel(
     init {
         focusable = true
         minSize(220f, 180f)
+        clipToBounds = true
         selectedIndex.subscribe(invalidate)
         onDispose { selectedIndex.unsubscribe(invalidate) }
         on(PointerDown) {
             if (items.isEmpty() || disabled) return@on
             requestFocus()
-            pressedTarget = actionAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            pressedTarget = actionAt(local.first, local.second)
             if (pressedTarget != Int.MIN_VALUE) it.consume()
         }
         on(PointerMove) {
             if (items.isEmpty()) return@on
-            hoverTarget = actionAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            hoverTarget = actionAt(local.first, local.second)
             requestRender()
         }
         on(PointerUp) {
             if (items.isEmpty() || disabled) return@on
-            val releasedTarget = actionAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val releasedTarget = actionAt(local.first, local.second)
             if (releasedTarget != Int.MIN_VALUE && releasedTarget == pressedTarget) {
                 activate(releasedTarget)
                 it.consume()
@@ -4331,7 +4396,7 @@ class MaterialCarousel(
         displayIndex = animate(displayIndex, targetIndex.toFloat(), context.time.deltaSeconds, 14f)
         val viewportWidth = measuredWidth.coerceAtLeast(width)
         val viewportHeight = measuredHeight.coerceAtLeast(height)
-        val cardWidth = (viewportWidth - 92f).coerceIn(180f, 320f)
+        val cardWidth = (viewportWidth * 0.68f).coerceIn(180f, 360f)
         val cardHeight = (viewportHeight - if (showIndicators) 44f else 20f).coerceAtLeast(132f)
         val cardTop = 8f
         val centerX = (viewportWidth - cardWidth) / 2f
@@ -4339,6 +4404,7 @@ class MaterialCarousel(
         val arrowSize = 32f
         val indicatorY = cardTop + cardHeight + 18f
         context.backend.translated(x, y) {
+            context.backend.clipped(0f, 0f, viewportWidth, viewportHeight) {
             items.forEachIndexed { index, item ->
                 val offset = index - displayIndex
                 if (abs(offset) > 1.15f) return@forEachIndexed
@@ -4346,7 +4412,7 @@ class MaterialCarousel(
                 val scale = 1f - 0.12f * absOffset.coerceAtMost(1f)
                 val drawWidth = cardWidth * scale
                 val drawHeight = cardHeight * scale
-                val drawX = centerX + offset * (cardWidth * 0.74f) + (cardWidth - drawWidth) / 2f
+                val drawX = centerX + offset * (cardWidth * 0.84f) + (cardWidth - drawWidth) / 2f
                 val drawY = cardTop + 8f * absOffset
                 val current = index == targetIndex
                 val hovered = hoverTarget == index
@@ -4359,7 +4425,7 @@ class MaterialCarousel(
                 val labelColor = if (current) p.primary.withAlpha(220) else p.primary
                 val contentWidth = (drawWidth - 32f).coerceAtLeast(48f)
                 val labelStyle = TextStyle((context.theme.typography.bodySize - 2f).coerceAtLeast(10f), labelColor, context.theme.typography.fontFamily)
-                val titleStyle = TextStyle(context.theme.typography.titleSize, textColor, context.theme.typography.fontFamily)
+                val titleStyle = TextStyle((context.theme.typography.bodySize + 6f).coerceAtMost(24f), textColor, context.theme.typography.fontFamily)
                 val supportingStyle = TextStyle((context.theme.typography.bodySize - 1f).coerceAtLeast(10f), supportingColor, context.theme.typography.fontFamily)
                 val bodyStyle = TextStyle(context.theme.typography.bodySize, supportingColor, context.theme.typography.fontFamily)
                 var cursorY = drawY + 28f
@@ -4399,6 +4465,7 @@ class MaterialCarousel(
                     context.backend.drawCircle(startX + index * spacing, indicatorY, if (selected) 4f else 3f, if (selected) p.primary else p.outlineVariant)
                 }
             }
+            }
         }
         if (abs(displayIndex - targetIndex.toFloat()) > 0.001f) requestRender()
     }
@@ -4431,7 +4498,7 @@ class MaterialCarousel(
     private fun actionAt(localX: Float, localY: Float): Int {
         val viewportWidth = measuredWidth.coerceAtLeast(width)
         val viewportHeight = measuredHeight.coerceAtLeast(height)
-        val cardWidth = (viewportWidth - 92f).coerceIn(180f, 320f)
+        val cardWidth = (viewportWidth * 0.68f).coerceIn(180f, 360f)
         val cardHeight = (viewportHeight - if (showIndicators) 44f else 20f).coerceAtLeast(132f)
         val cardTop = 8f
         val centerX = (viewportWidth - cardWidth) / 2f
@@ -4451,7 +4518,7 @@ class MaterialCarousel(
             val scale = 1f - 0.12f * absOffset.coerceAtMost(1f)
             val drawWidth = cardWidth * scale
             val drawHeight = cardHeight * scale
-            val drawX = centerX + offset * (cardWidth * 0.74f) + (cardWidth - drawWidth) / 2f
+            val drawX = centerX + offset * (cardWidth * 0.84f) + (cardWidth - drawWidth) / 2f
             val drawY = cardTop + 8f * absOffset
             if (localX in drawX..(drawX + drawWidth) && localY in drawY..(drawY + drawHeight)) return index
         }
@@ -5492,17 +5559,20 @@ class MaterialContextMenu(
         on(PointerDown) {
             if (!visible) return@on
             requestFocus()
-            pressedIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            pressedIndex = itemIndexAt(local.first, local.second)
             it.consume()
         }
         on(PointerMove) {
             if (!visible) return@on
-            hoverIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            hoverIndex = itemIndexAt(local.first, local.second)
             requestRender()
         }
         on(PointerUp) {
             if (!visible) return@on
-            val releasedIndex = itemIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val releasedIndex = itemIndexAt(local.first, local.second)
             when {
                 releasedIndex >= 0 && releasedIndex == pressedIndex -> {
                     items.getOrNull(releasedIndex)?.takeIf { menuItem -> menuItem.enabled && !menuItem.isSection && !menuItem.isDivider }?.onClick?.invoke()
@@ -5651,16 +5721,16 @@ class MaterialCascadingMenu(
         on(PointerDown) {
             if (!visible) return@on
             requestFocus()
-            val rootIndex = rootIndexAt(it.x - x, it.y - y)
-            val childIndex = childIndexAt(it.x - x, it.y - y)
+            val local = sceneToLocal(it.x, it.y)
+            val rootIndex = rootIndexAt(local.first, local.second)
+            val childIndex = childIndexAt(local.first, local.second)
             pressedRoot = rootIndex
             pressedChild = childIndex
             it.consume()
         }
         on(PointerMove) {
             if (!visible) return@on
-            val localX = it.x - x
-            val localY = it.y - y
+            val (localX, localY) = sceneToLocal(it.x, it.y)
             hoverRoot = rootIndexAt(localX, localY)
             if (hoverRoot >= 0 && items.getOrNull(hoverRoot)?.children?.isNotEmpty() == true) {
                 expandedParent = hoverRoot
@@ -5670,8 +5740,7 @@ class MaterialCascadingMenu(
         }
         on(PointerUp) {
             if (!visible) return@on
-            val localX = it.x - x
-            val localY = it.y - y
+            val (localX, localY) = sceneToLocal(it.x, it.y)
             val releasedRoot = rootIndexAt(localX, localY)
             val releasedChild = childIndexAt(localX, localY)
             when {
@@ -6734,17 +6803,7 @@ private fun String.takeFitting(context: RenderContext, style: TextStyle, maxWidt
 
 private fun drawArcStroke(context: RenderContext, centerX: Float, centerY: Float, radius: Float, startAngle: Float, sweep: Float, stroke: Stroke) {
     if (radius <= 0f || sweep == 0f) return
-    val steps = ((radius * abs(sweep)) / 6f).toInt().coerceAtLeast(12)
-    var previousX = centerX + cos(startAngle) * radius
-    var previousY = centerY + sin(startAngle) * radius
-    for (step in 1..steps) {
-        val angle = startAngle + sweep * (step.toFloat() / steps)
-        val x = centerX + cos(angle) * radius
-        val y = centerY + sin(angle) * radius
-        context.backend.drawLine(previousX, previousY, x, y, stroke)
-        previousX = x
-        previousY = y
-    }
+    context.backend.drawArc(centerX, centerY, radius, startAngle, sweep, stroke)
 }
 
 private fun animate(current: Float, target: Float, dt: Float, speed: Float): Float =

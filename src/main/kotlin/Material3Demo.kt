@@ -94,8 +94,15 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
         add(MaterialRadioButton(radio, "B", "Radio B").placed(400, 164))
         add(MaterialSlider(stateOf(0.62f), width = 430f).placed(24, 232))
         add(MaterialRangeSlider(stateOf(0.22f), stateOf(0.78f), width = 430f).placed(500, 232))
-        add(MaterialExposedDropdownMenu(stateOf(1), stateOf(false), listOf("All", "Unread", "Starred"), width = 280f, label = "Exposed Dropdown").placed(24, 282))
-        add(MaterialAutocompleteField(stateOf(""), stateOf(false), listOf("Ananda", "Animation", "Adaptive Grid", "Autocomplete"), width = 320f, label = "Autocomplete").placed(330, 282))
+        val dropdownExpanded = stateOf(false)
+        val autocompleteExpanded = stateOf(false)
+        fun updatePopupLayer() {
+            zIndex = if (dropdownExpanded.value || autocompleteExpanded.value) 100 else 0
+        }
+        dropdownExpanded.subscribe { updatePopupLayer() }
+        autocompleteExpanded.subscribe { updatePopupLayer() }
+        add(MaterialExposedDropdownMenu(stateOf(1), dropdownExpanded, listOf("All", "Unread", "Starred"), width = 280f, label = "Exposed Dropdown").placed(24, 282))
+        add(MaterialAutocompleteField(stateOf(""), autocompleteExpanded, listOf("Ananda", "Animation", "Adaptive Grid", "Autocomplete"), width = 320f, label = "Autocomplete").placed(330, 282))
     }
 
     ui.section("Progress - Badges - Refresh", 190f) {
@@ -185,7 +192,26 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
         var y = 66f
         fun launch(label: String, state: State<Boolean>, overlay: Component) {
             overlays += overlay
-            add(MaterialButton(label, width = 200f, variant = MaterialButtonStyle.Outlined) { state.value = true }.placed(x, y))
+            lateinit var launcher: MaterialButton
+            launcher = MaterialButton(label, width = 200f, variant = MaterialButtonStyle.Outlined) {
+                val (anchorX, anchorCenterY) = launcher.sceneAnchorRightCenter()
+                when (overlay) {
+                    is MaterialDropdownMenu -> {
+                        overlay.menuX = (anchorX + 8f).coerceAtMost(DemoWidth - overlay.menuWidth - 12f)
+                        overlay.menuY = (anchorCenterY - 24f).coerceIn(8f, DemoHeight - 180f)
+                    }
+                    is MaterialContextMenu -> {
+                        overlay.anchorX = (anchorX + 8f).coerceAtMost(DemoWidth - overlay.menuWidth - 12f)
+                        overlay.anchorY = (anchorCenterY - 24f).coerceIn(8f, DemoHeight - 180f)
+                    }
+                    is MaterialCascadingMenu -> {
+                        overlay.menuX = (anchorX + 8f).coerceAtMost(DemoWidth - overlay.menuWidth * 2f - 24f)
+                        overlay.menuY = (anchorCenterY - 24f).coerceIn(8f, DemoHeight - 180f)
+                    }
+                }
+                state.value = true
+            }.placed(x, y)
+            add(launcher)
             x += 220f
             if (x > 900f) { x = 24f; y += 58f }
         }

@@ -1,7 +1,6 @@
 package dev.unknownuser.ananda.window
 
 import dev.unknownuser.ananda.backend.RenderContext
-import dev.unknownuser.ananda.backend.ShapeInterpolatingRenderBackend
 import dev.unknownuser.ananda.backend.SkiaRenderBackend
 import dev.unknownuser.ananda.debug.DebugRenderBackend
 import dev.unknownuser.ananda.debug.DebuggerBridge
@@ -36,7 +35,6 @@ class SkiaWindow(
     private lateinit var frame: JFrame
     private var renderTimer: Timer? = null
     private var lastRenderNanoTime: Long = 0L
-    private var interpolationBackend: ShapeInterpolatingRenderBackend? = null
     @Volatile
     private var disposed = false
 
@@ -55,15 +53,8 @@ class SkiaWindow(
                 val backend = SkiaRenderBackend(canvas).let { skia ->
                     debuggerBridge?.let { DebugRenderBackend(skia, it) } ?: skia
                 }
-                val interpolatingBackend = interpolationBackend ?: ShapeInterpolatingRenderBackend(backend).also {
-                    interpolationBackend = it
-                }
-                interpolatingBackend.beginFrame(backend, deltaSeconds)
-                interpolatingBackend.clear(clearColor)
-                scene.render(RenderContext(interpolatingBackend, width, height, nanoTime, time = scene.time.snapshot()))
-                if (interpolatingBackend.endFrame()) {
-                    scene.requestRender()
-                }
+                backend.clear(clearColor)
+                scene.render(RenderContext(backend, width, height, nanoTime, time = scene.time.snapshot()))
             }
         })
 
