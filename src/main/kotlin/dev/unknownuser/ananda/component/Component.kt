@@ -845,52 +845,38 @@ open class Component(
         }
     }
 
-    fun onMount(block: () -> Unit) = apply {
-        mountHooks += block
-    }
-
-    fun onUnmount(block: () -> Unit) = apply {
-        unmountHooks += block
-    }
-
-    fun onDispose(block: () -> Unit) = apply {
-        disposeHooks += block
-    }
-
-    fun requestFocus() {
-        if (focusable && !disabled) ownerHost?.focus(this)
-    }
-
-    fun clearFocus() {
-        ownerHost?.takeIf { it.focusedComponent === this }?.focus(null)
-    }
+    fun onMount(block: () -> Unit) =    apply { mountHooks += block }
+    fun onUnmount(block: () -> Unit) =  apply { unmountHooks += block }
+    fun onDispose(block: () -> Unit) =  apply { disposeHooks += block }
+    fun requestFocus() { if (focusable && !disabled) ownerHost?.focus(this) }
+    fun clearFocus()   { ownerHost?.takeIf { it.focusedComponent === this }?.focus(null) }
 
     fun globalPosition(): Pair<Float, Float> {
         val parentPosition = parent?.globalPosition() ?: (0f to 0f)
         return parentPosition.first + x to parentPosition.second + y
     }
 
+
+
     fun sceneToLocal(sceneX: Float, sceneY: Float): Pair<Float, Float> {
         val (globalX, globalY) = globalPosition()
-        var scrollOffsetY = 0f
+        return (sceneX - globalX) to (sceneY - globalY + getScrollOffset())
+    }
+
+    fun getScrollOffset(): Float {
+        var scrollOffsetX = 0f
         var node: Component? = parent
         while (node != null) {
-            if (node is ScrollContainer) scrollOffsetY += node.scrollY
+            if (node is ScrollContainer) scrollOffsetX += node.scrollY
             node = node.parent
         }
-        return (sceneX - globalX) to (sceneY - globalY + scrollOffsetY)
+        return scrollOffsetX
     }
 
     /** Right-center anchor in scene space, adjusted for scroll container viewport offset. */
     fun sceneAnchorRightCenter(): Pair<Float, Float> {
         val (gx, gy) = globalPosition()
-        var scrollOffset = 0f
-        var node: Component? = parent
-        while (node != null) {
-            if (node is ScrollContainer) scrollOffset += node.scrollY
-            node = node.parent
-        }
-        return (gx + measuredWidth) to (gy - scrollOffset + measuredHeight / 2f)
+        return (gx + measuredWidth) to (gy - getScrollOffset() + measuredHeight / 2f)
     }
 
     protected fun readClipboard(): String? =

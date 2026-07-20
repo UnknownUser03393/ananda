@@ -13,8 +13,14 @@ repositories {
 
 dependencies {
 	val skikoVersion = "0.144.6"
+	val skikoTarget = when {
+		System.getProperty("os.name").startsWith("Mac", ignoreCase = true) && System.getProperty("os.arch") in setOf("aarch64", "arm64") -> "macos-arm64"
+		System.getProperty("os.name").startsWith("Mac", ignoreCase = true) -> "macos-x64"
+		System.getProperty("os.name").startsWith("Windows", ignoreCase = true) -> "windows-x64"
+		else -> "linux-x64"
+	}
 
-	implementation("org.jetbrains.skiko:skiko-awt-runtime-windows-x64:$skikoVersion")
+	implementation("org.jetbrains.skiko:skiko-awt-runtime-$skikoTarget:$skikoVersion")
 	implementation("com.google.code.gson:gson:2.10.1")
 	implementation("com.materialkolor:material-color-utilities:4.1.1")
 	testImplementation(kotlin("test"))

@@ -22,6 +22,7 @@ fun main() {
     val lightTheme = MaterialTheme.light(Color(38, 112, 105))
     val scene = Scene().apply { theme = darkTheme }
     val overlays = mutableListOf<Component>()
+    val demoMotion = DemoMotion(scene)
     var dark = true
 
     val root = MaterialSurface(width = DemoWidth.toFloat(), height = DemoHeight.toFloat(), level = MaterialSurfaceLevel.Lowest, shape = 0f)
@@ -38,7 +39,7 @@ fun main() {
     scroll.scrollStep = 42f
     val content = Component(width = DemoWidth.toFloat(), height = 4700f).placed(0, 0)
     val gallery = Gallery(content)
-    buildGallery(gallery, overlays)
+    buildGallery(gallery, overlays, demoMotion)
     scroll.add(content)
     root.add(scroll)
     scene.add(root)
@@ -53,10 +54,10 @@ fun main() {
     ).show()
 }
 
-private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
-    val enabled = stateOf(true)
-    val selected = stateOf(true)
-    val radio = stateOf("A")
+private fun buildGallery(ui: Gallery, overlays: MutableList<Component>, demoMotion: DemoMotion) {
+    val enabled = demoMotion.enabled
+    val selected = demoMotion.selected
+    val radio = demoMotion.radio
 
     ui.section("Surfaces - Buttons - Cards", 330f) {
         MaterialSurfaceLevel.entries.forEachIndexed { index, level ->
@@ -106,13 +107,13 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
     }
 
     ui.section("Progress - Badges - Refresh", 190f) {
-        add(MaterialLinearProgressIndicator(stateOf(0.68f), width = 260f).placed(24, 72))
+        add(MaterialLinearProgressIndicator(demoMotion.progress, width = 260f).placed(24, 72))
         add(MaterialIndeterminateLinearProgressIndicator(width = 260f).placed(24, 112))
-        add(MaterialCircularProgressIndicator(stateOf(0.72f)).placed(340, 60))
+        add(MaterialCircularProgressIndicator(demoMotion.progress).placed(340, 60))
         add(MaterialIndeterminateCircularProgressIndicator().placed(410, 60))
         add(MaterialBadge("9").placed(492, 70))
         add(MaterialBadge("").placed(540, 76))
-        add(MaterialRefreshIndicator(stateOf(false), stateOf(0.65f)).placed(600, 58))
+        add(MaterialRefreshIndicator(demoMotion.refreshing, demoMotion.refreshPull).placed(600, 58))
         add(MaterialRefreshIndicator(stateOf(true), stateOf(1f)).placed(670, 58))
         add(Label("Determinate / Indeterminate / Badge / Pull-to-refresh", width = 620f, height = 22f, size = 14f).placed(24, 138))
     }
@@ -140,7 +141,7 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
         add(MaterialBottomAppBar(width = 1128f, navigationLabel = "M", actions = actions(), fabLabel = "+").placed(24, 388))
     }
 
-    val navIndex = stateOf(0)
+    val navIndex = demoMotion.navIndex
     ui.section("Tabs - Navigation", 430f) {
         add(MaterialTabRow(listOf("Home", "Library", "Settings"), navIndex, width = 500f).placed(24, 64))
         add(MaterialSecondaryTabRow(listOf("Overview", "Files", "Activity"), stateOf(1), width = 500f).placed(24, 132))
@@ -170,7 +171,7 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
         add(MaterialDivider(width = 520f).placed(610, 78))
         add(MaterialListSubheader("Standalone list components", width = 520f).placed(610, 96))
         add(MaterialListItem("MaterialListItem", "Supporting text", "A", "12", stateOf(false)).placed(610, 140))
-        val expansion = MaterialExpansionPanel("Appearance", "Theme, density and type", stateOf(true), width = 520f).placed(610, 250)
+        val expansion = MaterialExpansionPanel("Appearance", "Theme, density and type", demoMotion.expanded, width = 520f).placed(610, 250)
         expansion.add(Label("Expanded MaterialExpansionPanel content", width = 460f, height = 24f, size = 14f).placed(18, 54))
         add(expansion)
     }
@@ -183,7 +184,7 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
                 MaterialCarouselItem("Material 3", "All components", "Native Skia rendering", "Components"),
                 MaterialCarouselItem("CJK fonts", "HarmonyOS Sans SC", "Per-codepoint fallback", "Typography")
             ),
-            stateOf(0), width = 540f, height = 280f
+            demoMotion.carouselIndex, width = 540f, height = 280f
         ).placed(610, 64))
     }
 
@@ -261,6 +262,47 @@ private fun buildGallery(ui: Gallery, overlays: MutableList<Component>) {
     ui.finishEntrance()
 }
 
+private class DemoMotion(scene: Scene) {
+    val enabled = stateOf(true)
+    val selected = stateOf(true)
+    val radio = stateOf("A")
+    val progress = stateOf(0.18f)
+    val refreshPull = stateOf(0.2f)
+    val refreshing = stateOf(false)
+    val navIndex = stateOf(0)
+    val carouselIndex = stateOf(0)
+    val expanded = stateOf(true)
+
+    private var elapsed = 0f
+    private var toggleBucket = -1
+    private var navBucket = -1
+
+    init {
+        scene.onUpdate { frame ->
+            elapsed += frame.deltaSeconds
+            progress.value = ((kotlin.math.sin(elapsed * 1.15f) + 1f) * 0.5f).coerceIn(0f, 1f)
+            refreshPull.value = ((kotlin.math.sin(elapsed * 1.7f) + 1f) * 0.5f).coerceIn(0f, 1f)
+            refreshing.value = kotlin.math.sin(elapsed * 1.7f) > 0.65f
+
+            val nextToggleBucket = (elapsed / 2.2f).toInt()
+            if (nextToggleBucket != toggleBucket) {
+                toggleBucket = nextToggleBucket
+                enabled.value = nextToggleBucket % 2 == 0
+                selected.value = nextToggleBucket % 2 == 0
+                radio.value = if (nextToggleBucket % 2 == 0) "A" else "B"
+                expanded.value = nextToggleBucket % 2 == 0
+            }
+
+            val nextNavBucket = (elapsed / 1.6f).toInt()
+            if (nextNavBucket != navBucket) {
+                navBucket = nextNavBucket
+                navIndex.value = nextNavBucket % 3
+                carouselIndex.value = nextNavBucket % 3
+            }
+        }
+    }
+}
+
 private class Gallery(private val content: Component) {
     private var y = 24f
     private val sections = mutableListOf<Component>()
@@ -276,7 +318,7 @@ private class Gallery(private val content: Component) {
 
     fun finishEntrance() {
         sections.forEachIndexed { index, section ->
-            section.animateEnter(EnterTransition(slideY = 18f, delaySeconds = index * 0.025f, initialScale = 0.99f))
+            section.animateEnter(EnterTransition(slideY = 30f, delaySeconds = index * 0.04f, initialScale = 0.96f, durationSeconds = 0.46f))
         }
     }
 }
